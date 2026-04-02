@@ -32,6 +32,7 @@ namespace doc {
 
 static Layer* index2layer(const Layer* layer, const LayerIndex& index, int* index_count);
 static LayerIndex layer2index(const Layer* layer, const Layer* find_layer, int* index_count);
+static void add_all_layers(const LayerFolder* folder, std::vector<Layer*>& layers);
 
 //////////////////////////////////////////////////////////////////////
 // Constructors/Destructor
@@ -237,12 +238,20 @@ LayerIndex Sprite::layerToIndex(const Layer* layer) const
 
 void Sprite::getLayersList(std::vector<Layer*>& layers) const
 {
-  // TODO support subfolders
-  LayerConstIterator it = m_folder->getLayerBegin();
-  LayerConstIterator end = m_folder->getLayerEnd();
+  add_all_layers(m_folder, layers);
+}
+
+static void add_all_layers(const LayerFolder* folder, std::vector<Layer*>& layers)
+{
+  LayerConstIterator it = folder->getLayerBegin();
+  LayerConstIterator end = folder->getLayerEnd();
 
   for (; it != end; ++it) {
-    layers.push_back(*it);
+    Layer* layer = *it;
+    layers.push_back(layer);
+
+    if (layer->isFolder())
+      add_all_layers(static_cast<const LayerFolder*>(layer), layers);
   }
 }
 

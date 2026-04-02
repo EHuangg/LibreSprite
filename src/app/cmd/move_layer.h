@@ -10,6 +10,10 @@
 #include "app/cmd.h"
 #include "app/cmd/with_layer.h"
 
+namespace doc {
+  class LayerFolder;
+}
+
 namespace app {
 namespace cmd {
   using namespace doc;
@@ -17,6 +21,7 @@ namespace cmd {
   class MoveLayer : public Cmd {
   public:
     MoveLayer(Layer* layer, Layer* afterThis);
+    MoveLayer(Layer* layer, LayerFolder* folder, Layer* afterThis);
 
   protected:
     void onExecute() override;
@@ -28,8 +33,12 @@ namespace cmd {
 
   private:
     WithLayer m_layer;
+    WithLayer m_oldFolder;
+    WithLayer m_newFolder;
     WithLayer m_oldAfterThis;
     WithLayer m_newAfterThis;
+
+    void moveLayer(LayerFolder* newFolder, Layer* afterThis);
   };
 
 } // namespace cmd

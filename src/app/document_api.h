@@ -83,6 +83,7 @@ namespace app {
     void addLayer(LayerFolder* folder, Layer* newLayer, Layer* afterThis);
     void removeLayer(Layer* layer);
     void restackLayerAfter(Layer* layer, Layer* afterThis);
+    void restackLayerInFolder(Layer* layer, LayerFolder* folder, Layer* afterThis);
     void restackLayerBefore(Layer* layer, Layer* beforeThis);
     void backgroundFromLayer(Layer* layer);
     void layerFromBackground(Layer* layer);

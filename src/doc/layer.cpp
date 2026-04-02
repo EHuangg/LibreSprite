@@ -259,6 +259,7 @@ void LayerImage::displaceFrames(frame_t fromThis, frame_t delta)
 LayerFolder::LayerFolder(Sprite* sprite)
   : Layer(ObjectType::LayerFolder, sprite)
 {
+  m_open = true;
   setName("Layer Set");
 }
 

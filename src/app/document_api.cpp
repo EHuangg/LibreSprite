@@ -434,6 +434,11 @@ void DocumentApi::restackLayerAfter(Layer* layer, Layer* afterThis)
   m_transaction.execute(new cmd::MoveLayer(layer, afterThis));
 }
 
+void DocumentApi::restackLayerInFolder(Layer* layer, LayerFolder* folder, Layer* afterThis)
+{
+  m_transaction.execute(new cmd::MoveLayer(layer, folder, afterThis));
+}
+
 void DocumentApi::restackLayerBefore(Layer* layer, Layer* beforeThis)
 {
   LayerIndex beforeThisIdx = layer->sprite()->layerToIndex(beforeThis);

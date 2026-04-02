@@ -49,6 +49,7 @@ private:
 
 static std::string get_unique_layer_name(Sprite* sprite);
 static int get_max_layer_num(Layer* layer);
+static Layer* get_top_visible_layer(Layer* layer);
 
 NewLayerCommand::NewLayerCommand()
   : Command("NewLayer",
@@ -103,6 +104,7 @@ void NewLayerCommand::onExecute(Context* context)
   }
 
   Layer* activeLayer = writer.layer();
+  Layer* topLayer = get_top_visible_layer(activeLayer);
   Layer* layer;
   {
     Transaction transaction(writer.context(), "New Layer");
@@ -111,8 +113,8 @@ void NewLayerCommand::onExecute(Context* context)
 
     // If "top" parameter is false, create the layer above the active
     // one.
-    if (activeLayer && !m_top)
-      api.restackLayerAfter(layer, activeLayer);
+    if (topLayer && !m_top)
+      api.restackLayerAfter(layer, topLayer);
 
     transaction.commit();
   }
@@ -149,6 +151,17 @@ static int get_max_layer_num(Layer* layer)
   }
 
   return max;
+}
+
+static Layer* get_top_visible_layer(Layer* layer)
+{
+  if (!layer)
+    return nullptr;
+
+  while (layer->parent() && layer->parent()->parent())
+    layer = layer->parent();
+
+  return layer;
 }
 
 Command* CommandFactory::createNewLayerCommand()

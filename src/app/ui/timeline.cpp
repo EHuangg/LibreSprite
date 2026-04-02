@@ -52,6 +52,7 @@
 #include "ui/ui.h"
 
 #include <cstdio>
+#include <stdexcept>
 
 // Size of the thumbnail in the screen (width x height), the really
 // size of the thumbnail bitmap is specified in the
@@ -91,6 +92,7 @@ enum {
   PART_HEADER_CONTINUOUS,
   PART_HEADER_GEAR,
   PART_HEADER_ONIONSKIN,
+  PART_HEADER_LAYER_GROUP,
   PART_HEADER_ONIONSKIN_RANGE_LEFT,
   PART_HEADER_ONIONSKIN_RANGE_RIGHT,
   PART_HEADER_LAYER,
@@ -116,6 +118,37 @@ struct Timeline::DrawCelData {
   CelIterator firstLink;        // First link to the active cel
   CelIterator lastLink;         // Last link to the active cel
 };
+
+static bool isLayerDescendantOf(const Layer* layer, const Layer* possibleAncestor)
+{
+  const Layer* it = layer;
+  while (it) {
+    if (it == possibleAncestor)
+      return true;
+    it = it->parent();
+  }
+  return false;
+}
+
+static void setLayerTreeVisible(Layer* layer, bool visible)
+{
+  layer->setVisible(visible);
+  if (layer->isFolder()) {
+    LayerFolder* folder = static_cast<LayerFolder*>(layer);
+    for (Layer* child : folder->getLayersList())
+      setLayerTreeVisible(child, visible);
+  }
+}
+
+static void setLayerTreeEditable(Layer* layer, bool editable)
+{
+  layer->setEditable(editable);
+  if (layer->isFolder()) {
+    LayerFolder* folder = static_cast<LayerFolder*>(layer);
+    for (Layer* child : folder->getLayersList())
+      setLayerTreeEditable(child, editable);
+  }
+}
 
 Timeline::Timeline()
   : Widget(kGenericWidget)
@@ -571,8 +604,8 @@ bool Timeline::onProcessMessage(Message* msg)
 
           case PART_HEADER_EYE: {
             bool newVisibleState = !allLayersVisible();
-            for (size_t i=0; i<m_layers.size(); i++)
-              m_layers[i]->setVisible(newVisibleState);
+            for (Layer* layer : m_sprite->folder()->getLayersList())
+              setLayerTreeVisible(layer, newVisibleState);
 
             // Redraw all views.
             m_document->notifyGeneralUpdate();
@@ -581,8 +614,8 @@ bool Timeline::onProcessMessage(Message* msg)
 
           case PART_HEADER_PADLOCK: {
             bool newEditableState = !allLayersUnlocked();
-            for (size_t i=0; i<m_layers.size(); i++)
-              m_layers[i]->setEditable(newEditableState);
+            for (Layer* layer : m_sprite->folder()->getLayersList())
+              setLayerTreeEditable(layer, newEditableState);
             break;
           }
 
@@ -623,6 +656,17 @@ bool Timeline::onProcessMessage(Message* msg)
             break;
           }
 
+          case PART_HEADER_LAYER_GROUP: {
+            cleanClk();
+            invalidateHit(Hit(PART_HEADER_LAYER_GROUP));
+
+            Command* command = CommandsModule::instance()
+              ->getCommandByName(CommandId::NewLayerSet);
+
+            UIContext::instance()->executeCommand(command);
+            break;
+          }
+
           case PART_HEADER_FRAME:
             // Show the frame pop-up menu.
             if (mouseMsg->right()) {
@@ -658,7 +702,7 @@ bool Timeline::onProcessMessage(Message* msg)
             if (m_hot.layer == m_clk.layer && validLayer(m_hot.layer)) {
               Layer* layer = m_layers[m_clk.layer];
               ASSERT(layer != NULL);
-              layer->setVisible(!layer->isVisible());
+              setLayerTreeVisible(layer, !layer->isVisible());
 
               // Redraw all views.
               m_document->notifyGeneralUpdate();
@@ -670,7 +714,7 @@ bool Timeline::onProcessMessage(Message* msg)
             if (m_hot.layer == m_clk.layer && validLayer(m_hot.layer)) {
               Layer* layer = m_layers[m_clk.layer];
               ASSERT(layer != NULL);
-              layer->setEditable(!layer->isEditable());
+              setLayerTreeEditable(layer, !layer->isEditable());
             }
             break;
 
@@ -678,7 +722,15 @@ bool Timeline::onProcessMessage(Message* msg)
             if (m_hot.layer == m_clk.layer && validLayer(m_hot.layer)) {
               Layer* layer = m_layers[m_clk.layer];
               ASSERT(layer != NULL);
-              layer->setContinuous(!layer->isContinuous());
+              if (layer->isFolder()) {
+                LayerFolder* folder = static_cast<LayerFolder*>(layer);
+                folder->setOpen(!folder->isOpen());
+                regenerateLayers();
+                invalidate();
+              }
+              else {
+                layer->setContinuous(!layer->isContinuous());
+              }
             }
             break;
 
@@ -1274,6 +1326,13 @@ void Timeline::drawPart(ui::Graphics* g, const gfx::Rect& bounds,
   style->paint(g, bounds, text, state);
 }
 
+int Timeline::layerDepth(LayerIndex layerIdx) const
+{
+  if (!validLayer(layerIdx) || int(layerIdx) >= int(m_layerDepths.size()))
+    return 0;
+  return m_layerDepths[int(layerIdx)];
+}
+
 void Timeline::drawClipboardRange(ui::Graphics* g)
 {
   Document* clipboard_document;
@@ -1339,6 +1398,15 @@ void Timeline::drawHeader(ui::Graphics* g)
     m_hot.part == PART_HEADER_ONIONSKIN,
     m_clk.part == PART_HEADER_ONIONSKIN);
 
+  drawPart(g, getPartBounds(Hit(PART_HEADER_LAYER_GROUP)),
+    NULL,
+    m_clk.part == PART_HEADER_LAYER_GROUP ?
+      styles.timelineLayerGroupEmptyClosedSelected() :
+      styles.timelineLayerGroupEmptyClosed(),
+    false,
+    m_hot.part == PART_HEADER_LAYER_GROUP,
+    false);
+
   // Empty header space.
   drawPart(g, getPartBounds(Hit(PART_HEADER_LAYER)),
     NULL, styles.timelineBox(), false, false, false);
@@ -1368,6 +1436,8 @@ void Timeline::drawLayer(ui::Graphics* g, LayerIndex layerIdx)
 {
   SkinTheme::Styles& styles = skinTheme()->styles;
   Layer* layer = m_layers[layerIdx];
+  int depth = layerDepth(layerIdx);
+  int indent = depth * FRMSIZE;
   bool is_active = isLayerActive(layerIdx);
   bool hotlayer = (m_hot.layer == layerIdx);
   bool clklayer = (m_clk.layer == layerIdx);
@@ -1375,6 +1445,11 @@ void Timeline::drawLayer(ui::Graphics* g, LayerIndex layerIdx)
   IntersectClip clip(g, bounds);
   if (!clip)
     return;
+
+  if (depth > 0) {
+    int guide_x = bounds.x + indent - FRMSIZE/2;
+    g->drawVLine(skinTheme()->colors.timelineActive(), guide_x, bounds.y, bounds.h);
+  }
 
   // Draw the eye (visible flag).
   bounds = getPartBounds(Hit(PART_LAYER_EYE_ICON, layerIdx));
@@ -1394,11 +1469,26 @@ void Timeline::drawLayer(ui::Graphics* g, LayerIndex layerIdx)
 
   // Draw the continuous flag.
   bounds = getPartBounds(Hit(PART_LAYER_CONTINUOUS_ICON, layerIdx));
-  drawPart(g, bounds, NULL,
-    layer->isContinuous() ? styles.timelineContinuous(): styles.timelineDiscontinuous(),
-    is_active,
-    (hotlayer && m_hot.part == PART_LAYER_CONTINUOUS_ICON),
-    (clklayer && m_clk.part == PART_LAYER_CONTINUOUS_ICON));
+  if (layer->isFolder()) {
+    LayerFolder* folder = static_cast<LayerFolder*>(layer);
+    bool hasChildren = (folder->getLayersCount() > 0);
+    bool isOpen = folder->isOpen();
+
+    drawPart(g, bounds, NULL,
+      hasChildren ?
+        (isOpen ? styles.timelineLayerGroupFilledOpen(): styles.timelineLayerGroupFilledClosed()):
+        (isOpen ? styles.timelineLayerGroupEmptyOpen(): styles.timelineLayerGroupEmptyClosed()),
+      is_active,
+      (hotlayer && m_hot.part == PART_LAYER_CONTINUOUS_ICON),
+      (clklayer && m_clk.part == PART_LAYER_CONTINUOUS_ICON));
+  }
+  else {
+    drawPart(g, bounds, NULL,
+      layer->isContinuous() ? styles.timelineContinuous(): styles.timelineDiscontinuous(),
+      is_active,
+      (hotlayer && m_hot.part == PART_LAYER_CONTINUOUS_ICON),
+      (clklayer && m_clk.part == PART_LAYER_CONTINUOUS_ICON));
+  }
 
   // Get the layer's name bounds.
   bounds = getPartBounds(Hit(PART_LAYER_TEXT, layerIdx));
@@ -1658,6 +1748,21 @@ void Timeline::drawRangeOutline(ui::Graphics* g)
     }
 
     case Range::kLayers: {
+      // Apply indent offset for nested layers
+      if (validLayer(drop.layerBegin())) {
+        int indent = layerDepth(drop.layerBegin()) * FRMSIZE;
+        dropBounds.x += indent;
+        dropBounds.w = MAX(1, dropBounds.w - indent);
+      }
+
+      if (m_dropTarget.vhit == DropTarget::InsideFolder) {
+        dropBounds.x = MAX(dropBounds.x, gfx::Rect(clientBounds().x + FRMSIZE*3, 0, 0, 0).x);
+        dropBounds.w = MAX(1, dropBounds.w);
+        dropBounds = dropBounds.enlarge(OUTLINE_WIDTH);
+        styles.timelineRangeOutline()->paint(g, dropBounds, NULL, Style::active());
+        break;
+      }
+
       int h = 5 * guiscale(); // TODO get height from the skin info
 
       if (m_dropTarget.vhit == DropTarget::Top)
@@ -1792,9 +1897,12 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
     case PART_HEADER_ONIONSKIN:
       return gfx::Rect(bounds.x + FRMSIZE*4, bounds.y + y, FRMSIZE, HDRSIZE);
 
+    case PART_HEADER_LAYER_GROUP:
+      return gfx::Rect(bounds.x + FRMSIZE*5, bounds.y + y, FRMSIZE, HDRSIZE);
+
     case PART_HEADER_LAYER:
-      return gfx::Rect(bounds.x + FRMSIZE*5, bounds.y + y,
-        m_separator_x - FRMSIZE*5, HDRSIZE);
+      return gfx::Rect(bounds.x + FRMSIZE*6, bounds.y + y,
+        MAX(0, m_separator_x - FRMSIZE*6), HDRSIZE);
 
     case PART_HEADER_FRAME:
       return gfx::Rect(
@@ -1842,7 +1950,7 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
 
     case PART_LAYER_TEXT:
       if (validLayer(hit.layer)) {
-        int x = FRMSIZE*3;
+        int x = FRMSIZE*3 + layerDepth(hit.layer) * FRMSIZE;
         return gfx::Rect(bounds.x + x,
           bounds.y + y + HDRSIZE + LAYSIZE*(lastLayer()-hit.layer) - viewScroll().y,
           m_separator_x - x, LAYSIZE);
@@ -1860,6 +1968,14 @@ gfx::Rect Timeline::getPartBounds(const Hit& hit) const
 
     case PART_RANGE_OUTLINE: {
       gfx::Rect rc = getRangeBounds(m_range);
+      
+      // Apply indent offset for nested layers
+      if (m_range.type() == Range::kLayers && validLayer(m_range.layerBegin())) {
+        int indent = layerDepth(m_range.layerBegin()) * FRMSIZE;
+        rc.x += indent;
+        rc.w = MAX(1, rc.w - indent);
+      }
+      
       int s = OUTLINE_WIDTH;
       rc.enlarge(s);
       if (rc.x < bounds.x) rc.offset(s, 0).inflate(-s, 0);
@@ -1921,18 +2037,23 @@ void Timeline::regenerateLayers()
   ASSERT(m_document != NULL);
   ASSERT(m_sprite != NULL);
 
-  size_t nlayers = m_sprite->countLayers();
-  if (m_layers.size() != nlayers) {
-    if (nlayers > 0)
-      m_layers.resize(nlayers, NULL);
-    else
-      m_layers.clear();
-  }
+  m_layers.clear();
+  m_layerDepths.clear();
 
-  for (size_t c=0; c<nlayers; c++)
-    m_layers[c] = m_sprite->indexToLayer(LayerIndex(c));
+  appendVisibleLayers(m_sprite->folder(), 0);
 
   updateScrollBars();
+}
+
+void Timeline::appendVisibleLayers(LayerFolder* folder, int depth)
+{
+  for (Layer* layer : folder->getLayersList()) {
+    if (layer->isFolder() && static_cast<LayerFolder*>(layer)->isOpen())
+      appendVisibleLayers(static_cast<LayerFolder*>(layer), depth+1);
+
+    m_layers.push_back(layer);
+    m_layerDepths.push_back(depth);
+  }
 }
 
 void Timeline::updateScrollBars()
@@ -2030,6 +2151,8 @@ Timeline::Hit Timeline::hitTest(ui::Message* msg, const gfx::Point& mousePos)
           hit.part = PART_HEADER_GEAR;
         else if (getPartBounds(Hit(PART_HEADER_ONIONSKIN)).contains(mousePos))
           hit.part = PART_HEADER_ONIONSKIN;
+        else if (getPartBounds(Hit(PART_HEADER_LAYER_GROUP)).contains(mousePos))
+          hit.part = PART_HEADER_LAYER_GROUP;
         else if (getPartBounds(Hit(PART_HEADER_LAYER)).contains(mousePos))
           hit.part = PART_HEADER_LAYER;
       }
@@ -2168,6 +2291,15 @@ void Timeline::updateStatusBar(ui::Message* msg)
           layerIdx = m_dropRange.layerEnd();
 
         Layer* layer = ((layerIdx >= 0 && layerIdx < (int)m_layers.size()) ? m_layers[layerIdx]: NULL);
+        Layer* folderTarget =
+          (validLayer(m_dropTarget.layerIdx) ? m_layers[m_dropTarget.layerIdx]: NULL);
+
+        if (m_dropTarget.vhit == DropTarget::InsideFolder &&
+            folderTarget && folderTarget->isFolder()) {
+          sb->setStatusText(0, "%s inside layer set %s", verb, folderTarget->name().c_str());
+          return;
+        }
+
         if (layer) {
           if (m_dropTarget.vhit == DropTarget::Bottom) {
             sb->setStatusText(0, "%s at bottom of layer %s", verb, layer->name().c_str());
@@ -2423,6 +2555,196 @@ bool Timeline::isFrameActive(frame_t frame) const
 void Timeline::dropRange(DropOp op)
 {
   bool copy = (op == Timeline::kCopy);
+
+  // Helper to extract selected layers without nested descendants
+  auto getSelectedLayers = [this]() -> std::vector<Layer*> {
+    std::vector<Layer*> selectedLayers;
+    selectedLayers.reserve(m_range.layers());
+
+    for (LayerIndex i = m_range.layerBegin(); i <= m_range.layerEnd(); ++i) {
+      Layer* candidate = m_layers[i];
+
+      bool isNestedSelection = false;
+      for (Layer* selected : selectedLayers) {
+        if (candidate != selected && isLayerDescendantOf(candidate, selected)) {
+          isNestedSelection = true;
+          break;
+        }
+      }
+
+      if (!isNestedSelection)
+        selectedLayers.push_back(candidate);
+    }
+    return selectedLayers;
+  };
+
+  // Helper to find common parent folder of layers
+  auto getCommonParent = [](const std::vector<Layer*>& layers) -> LayerFolder* {
+    if (layers.empty()) return nullptr;
+    LayerFolder* parent = layers[0]->parent();
+    for (size_t i = 1; i < layers.size(); ++i) {
+      if (layers[i]->parent() != parent)
+        return nullptr;  // Not all in same parent
+    }
+    return parent;
+  };
+
+  if (m_range.type() == Range::kLayers && validLayer(m_dropTarget.layerIdx)) {
+    std::vector<Layer*> selectedLayers = getSelectedLayers();
+    if (selectedLayers.empty())
+      return;
+      
+    Layer* target = m_layers[m_dropTarget.layerIdx];
+    LayerFolder* selectedParent = getCommonParent(selectedLayers);
+    LayerFolder* targetParent = target ? target->parent() : nullptr;
+    LayerFolder* targetFolder = nullptr;
+    bool shouldUseCrossFolderApi = false;
+
+    // Determine if we need to use cross-folder API
+    if (m_dropTarget.vhit == DropTarget::InsideFolder) {
+      // Dropping INTO a folder
+      if (!target || !target->isFolder()) {
+        return;  // Can only drop inside a folder
+      }
+      
+      targetFolder = static_cast<LayerFolder*>(target);
+      shouldUseCrossFolderApi = true;
+    }
+    else if (m_dropTarget.vhit == DropTarget::Top || m_dropTarget.vhit == DropTarget::Bottom) {
+      // Check if any selected layer is a folder (layerset)
+      bool selectedHasFolder = false;
+      for (Layer* layer : selectedLayers) {
+        if (layer->isFolder()) {
+          selectedHasFolder = true;
+          break;
+        }
+      }
+      
+      // Check if target is a folder
+      bool targetIsFolder = target && target->isFolder();
+      
+      // If ANY layer is nested or is a folder, use cross-folder API
+      // Standard move_range() doesn't work with nested structures
+      if (selectedParent || targetParent || selectedHasFolder || targetIsFolder) {
+        // Determine target folder for nested/folder operations
+        if (targetParent) {
+          targetFolder = targetParent;
+        }
+        else if (selectedParent) {
+          targetFolder = selectedParent;
+        }
+        else {
+          targetFolder = m_sprite->folder();
+        }
+        shouldUseCrossFolderApi = true;
+      }
+      // else: pure top-level non-folder operations, fall through to standard logic
+    }
+
+    if (shouldUseCrossFolderApi && targetFolder) {
+      // Validate constraints
+      for (Layer* layer : selectedLayers) {
+        if (layer == targetFolder || isLayerDescendantOf(targetFolder, layer)) {
+          ui::Alert::show("Problem<<Cannot move/copy a layer set into itself.||&OK");
+          return;
+        }
+        
+        // Prevent layer sets from being placed inside other layer sets
+        if (layer->isFolder() && targetFolder != m_sprite->folder()) {
+          ui::Alert::show("Problem<<Layer sets can only be at the top level.||&OK");
+          return;
+        }
+      }
+
+      prepareToMoveRange();
+
+      try {
+        ContextWriter writer(UIContext::instance());
+        Transaction transaction(writer.context(), copy ? "Copy Layers": "Move Layers");
+        DocumentApi api = m_document->getApi(transaction);
+
+        std::vector<Layer*> movedLayers;
+        movedLayers.reserve(selectedLayers.size());
+
+        // Determine insert position within target folder
+        Layer* afterThis = nullptr;
+        if (m_dropTarget.vhit == DropTarget::Top && target && targetFolder) {
+          // Find the layer before target in targetFolder's list
+          Layer* prevLayer = nullptr;
+          for (Layer* layer : targetFolder->getLayersList()) {
+            if (layer == target)
+              break;
+            prevLayer = layer;
+          }
+          afterThis = prevLayer;  // nullptr if target is first
+        }
+        else if (m_dropTarget.vhit == DropTarget::Bottom && target && targetFolder) {
+          // Insert after target
+          afterThis = target;
+        }
+        else if (targetFolder) {
+          // InsideFolder: append to end
+          afterThis = targetFolder->getLastLayer();
+        }
+
+        if (copy) {
+          for (Layer* layer : selectedLayers) {
+            api.duplicateLayerAfter(layer, layer);
+            Layer* duplicate = layer->getNext();
+            if (!duplicate)
+              throw std::runtime_error("Cannot duplicate layer");
+
+            api.restackLayerInFolder(duplicate, targetFolder, afterThis);
+            afterThis = duplicate;
+            movedLayers.push_back(duplicate);
+          }
+        }
+        else {
+          for (Layer* layer : selectedLayers) {
+            api.restackLayerInFolder(layer, targetFolder, afterThis);
+            afterThis = layer;
+            movedLayers.push_back(layer);
+          }
+        }
+
+        transaction.commit();
+
+        m_document->notifyGeneralUpdate();
+        regenerateLayers();
+
+        LayerIndex first = LayerIndex::NoLayer;
+        LayerIndex last = LayerIndex::NoLayer;
+        for (Layer* layer : movedLayers) {
+          LayerIndex idx = getLayerIndex(layer);
+          if (idx == LayerIndex::NoLayer)
+            continue;
+
+          if (first == LayerIndex::NoLayer || idx < first)
+            first = idx;
+          if (last == LayerIndex::NoLayer || idx > last)
+            last = idx;
+        }
+
+        if (first != LayerIndex::NoLayer && last != LayerIndex::NoLayer) {
+          m_range.startRange(first, m_frame, Range::kLayers);
+          m_range.endRange(last, m_frame);
+        }
+        else {
+          m_range.disableRange();
+        }
+
+        if (!movedLayers.empty() && getLayerIndex(movedLayers[0]) != LayerIndex::NoLayer)
+          setLayer(movedLayers[0]);
+
+        return;
+      }
+      catch (const std::exception& e) {
+        ui::Alert::show("Problem<<%s||&OK", e.what());
+        return;
+      }
+    }
+  }
+
   Range newFromRange;
   DocumentRangePlace place = kDocumentRangeAfter;
 
@@ -2489,6 +2811,7 @@ void Timeline::updateDropRange(const gfx::Point& pt)
   DropTarget::VHit oldVHit = m_dropTarget.vhit;
   m_dropTarget.hhit = DropTarget::HNone;
   m_dropTarget.vhit = DropTarget::VNone;
+  m_dropTarget.layerIdx = LayerIndex::NoLayer;
 
   if (m_state != STATE_MOVING_RANGE) {
     m_dropRange.disableRange();
@@ -2540,6 +2863,7 @@ void Timeline::updateDropRange(const gfx::Point& pt)
 
       m_dropRange.startRange(layer, m_frame, m_range.type());
       m_dropRange.endRange(layerEnd, m_frame);
+      m_dropTarget.layerIdx = layer;
       break;
     }
   }
@@ -2555,6 +2879,20 @@ void Timeline::updateDropRange(const gfx::Point& pt)
     m_dropTarget.vhit = DropTarget::Top;
   else
     m_dropTarget.vhit = DropTarget::Bottom;
+
+  if (m_range.type() == Range::kLayers &&
+      validLayer(m_dropTarget.layerIdx)) {
+    Layer* target = m_layers[m_dropTarget.layerIdx];
+    if (target && target->isFolder() &&
+        !(m_dropTarget.layerIdx >= m_range.layerBegin() && m_dropTarget.layerIdx <= m_range.layerEnd())) {
+      // Keep a small edge area for top/bottom restack and use the rest as "drop inside".
+      const int edgeThreshold = MAX(1, 2*guiscale());
+      const int topThreshold = bounds.y + edgeThreshold;
+      const int bottomThreshold = bounds.y + bounds.h - edgeThreshold;
+      if (pt.y >= topThreshold && pt.y <= bottomThreshold)
+        m_dropTarget.vhit = DropTarget::InsideFolder;
+    }
+  }
 
   if (oldHHit != m_dropTarget.hhit ||
       oldVHit != m_dropTarget.vhit) {

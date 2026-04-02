@@ -13,19 +13,21 @@
 #include "app/commands/command.h"
 #include "app/context_access.h"
 #include "app/document_api.h"
-#include "app/document_api.h"
-#include "app/find_widget.h"
-#include "app/load_widget.h"
 #include "app/modules/gui.h"
 #include "app/ui/status_bar.h"
 #include "app/transaction.h"
+#include "app/ui/main_window.h"
 #include "doc/layer.h"
 #include "doc/sprite.h"
-#include "ui/ui.h"
+
+#include <cstdio>
+#include <cstring>
 
 namespace app {
 
-using namespace ui;
+static std::string get_unique_layer_set_name(Sprite* sprite);
+static int get_max_layer_set_num(Layer* layer);
+static Layer* get_top_visible_layer(Layer* layer);
 
 class NewLayerSetCommand : public Command {
 public:
@@ -55,28 +57,67 @@ void NewLayerSetCommand::onExecute(Context* context)
   ContextWriter writer(context);
   Document* document(writer.document());
   Sprite* sprite(writer.sprite());
-
-  // load the window widget
-  std::unique_ptr<Window> window(app::load_widget<Window>("new_layer.xml", "new_layer_set"));
-
-  window->openWindowInForeground();
-
-  if (window->closer() != window->findChild("ok"))
-    return;
-
-  std::string name = window->findChild("name")->text();
+  Layer* activeLayer = writer.layer();
+  Layer* topLayer = get_top_visible_layer(activeLayer);
+  std::string name = get_unique_layer_set_name(sprite);
   Layer* layer;
   {
     Transaction transaction(writer.context(), "New Layer");
-    layer = document->getApi(transaction).newLayerFolder(sprite);
+    DocumentApi api = document->getApi(transaction);
+    layer = api.newLayerFolder(sprite);
+
+    // Create the new folder above the active layer or active layer set.
+    if (topLayer)
+      api.restackLayerAfter(layer, topLayer);
+
+    layer->setName(name);
     transaction.commit();
   }
-  layer->setName(name);
 
   update_screen_for_document(document);
 
   StatusBar::instance()->invalidate();
   StatusBar::instance()->showTip(1000, "Layer `%s' created", name.c_str());
+
+  App::instance()->mainWindow()->popTimeline();
+}
+
+static std::string get_unique_layer_set_name(Sprite* sprite)
+{
+  char buf[1024];
+  std::snprintf(buf, sizeof(buf), "Layer Set %d", get_max_layer_set_num(sprite->folder())+1);
+  return buf;
+}
+
+static int get_max_layer_set_num(Layer* layer)
+{
+  int max = 0;
+
+  if (std::strncmp(layer->name().c_str(), "Layer Set ", 10) == 0)
+    max = std::strtol(layer->name().c_str()+10, NULL, 10);
+
+  if (layer->isFolder()) {
+    LayerIterator it = static_cast<LayerFolder*>(layer)->getLayerBegin();
+    LayerIterator end = static_cast<LayerFolder*>(layer)->getLayerEnd();
+
+    for (; it != end; ++it) {
+      int tmp = get_max_layer_set_num(*it);
+      max = MAX(tmp, max);
+    }
+  }
+
+  return max;
+}
+
+static Layer* get_top_visible_layer(Layer* layer)
+{
+  if (!layer)
+    return nullptr;
+
+  while (layer->parent() && layer->parent()->parent())
+    layer = layer->parent();
+
+  return layer;
 }
 
 Command* CommandFactory::createNewLayerSetCommand()

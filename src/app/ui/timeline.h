@@ -166,7 +166,7 @@ namespace app {
 
     struct DropTarget {
       enum HHit { HNone, Before, After };
-      enum VHit { VNone, Bottom, Top };
+      enum VHit { VNone, Bottom, Top, InsideFolder };
 
       DropTarget() {
         hhit = HNone;
@@ -209,6 +209,7 @@ namespace app {
     void drawPaddings(ui::Graphics* g);
     bool drawPart(ui::Graphics* g, int part, LayerIndex layer, frame_t frame);
     void drawClipboardRange(ui::Graphics* g);
+    void appendVisibleLayers(LayerFolder* folder, int depth);
     gfx::Rect getLayerHeadersBounds() const;
     gfx::Rect getFrameHeadersBounds() const;
     gfx::Rect getOnionskinFramesBounds() const;
@@ -247,6 +248,7 @@ namespace app {
 
     bool validLayer(LayerIndex layer) const { return layer >= firstLayer() && layer <= lastLayer(); }
     bool validFrame(frame_t frame) const { return frame >= firstFrame() && frame <= lastFrame(); }
+    int layerDepth(LayerIndex layerIdx) const;
 
     int topHeight() const;
 
@@ -266,6 +268,7 @@ namespace app {
     Range m_dropRange;
     State m_state;
     std::vector<Layer*> m_layers;
+    std::vector<int> m_layerDepths;
     int m_separator_x;
     int m_separator_w;
     int m_origFrames;

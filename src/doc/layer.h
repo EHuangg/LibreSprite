@@ -161,6 +161,9 @@ namespace doc {
 
     virtual int getMemSize() const override;
 
+    bool isOpen() const { return m_open; }
+    void setOpen(bool state) { m_open = state; }
+
     const LayerList& getLayersList() { return m_layers; }
     LayerIterator getLayerBegin() { return m_layers.begin(); }
     LayerIterator getLayerEnd() { return m_layers.end(); }
@@ -182,6 +185,7 @@ namespace doc {
     void destroyAllLayers();
 
     LayerList m_layers;
+    bool m_open;
   };
 
 } // namespace doc

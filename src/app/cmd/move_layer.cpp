@@ -23,6 +23,17 @@ using namespace doc;
 
 MoveLayer::MoveLayer(Layer* layer, Layer* afterThis)
   : m_layer(layer)
+  , m_oldFolder(layer->parent())
+  , m_newFolder(layer->parent())
+  , m_oldAfterThis(layer->getPrevious())
+  , m_newAfterThis(afterThis)
+{
+}
+
+MoveLayer::MoveLayer(Layer* layer, LayerFolder* folder, Layer* afterThis)
+  : m_layer(layer)
+  , m_oldFolder(layer->parent())
+  , m_newFolder(folder)
   , m_oldAfterThis(layer->getPrevious())
   , m_newAfterThis(afterThis)
 {
@@ -30,20 +41,12 @@ MoveLayer::MoveLayer(Layer* layer, Layer* afterThis)
 
 void MoveLayer::onExecute()
 {
-  m_layer.layer()->parent()->stackLayer(
-    m_layer.layer(),
-    m_newAfterThis.layer());
-
-  m_layer.layer()->parent()->incrementVersion();
+  moveLayer(static_cast<LayerFolder*>(m_newFolder.layer()), m_newAfterThis.layer());
 }
 
 void MoveLayer::onUndo()
 {
-  m_layer.layer()->parent()->stackLayer(
-    m_layer.layer(),
-    m_oldAfterThis.layer());
-
-  m_layer.layer()->parent()->incrementVersion();
+  moveLayer(static_cast<LayerFolder*>(m_oldFolder.layer()), m_oldAfterThis.layer());
 }
 
 void MoveLayer::onFireNotifications()
@@ -54,6 +57,26 @@ void MoveLayer::onFireNotifications()
   ev.sprite(layer->sprite());
   ev.layer(layer);
   doc->notifyObservers<DocumentEvent&>(&DocumentObserver::onLayerRestacked, ev);
+}
+
+void MoveLayer::moveLayer(LayerFolder* newFolder, Layer* afterThis)
+{
+  ASSERT(newFolder != NULL);
+
+  Layer* layer = m_layer.layer();
+  LayerFolder* oldFolder = layer->parent();
+
+  if (afterThis)
+    ASSERT(afterThis->parent() == newFolder);
+
+  if (oldFolder != newFolder) {
+    oldFolder->removeLayer(layer);
+    newFolder->addLayer(layer);
+    oldFolder->incrementVersion();
+  }
+
+  newFolder->stackLayer(layer, afterThis);
+  newFolder->incrementVersion();
 }
 
 } // namespace cmd

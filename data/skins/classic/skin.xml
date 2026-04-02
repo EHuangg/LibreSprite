@@ -349,6 +349,14 @@
     <part id="timeline_onionskin"               x="264" y="36" w="12" h="12" />
     <part id="timeline_onionskin_active"        x="264" y="48" w="12" h="12" />
     <part id="timeline_onionskin_range"         x="240" y="120" w1="3" w2="6" w3="3" h1="3" h2="6" h3="3" />
+    <part id="timeline_layer_group_filled_open"          x="278" y="63" w="10" h="6" />
+    <part id="timeline_layer_group_filled_closed"        x="291" y="62" w="8" h="7" />
+    <part id="timeline_layer_group_empty_open"           x="278" y="76" w="10" h="5" />
+    <part id="timeline_layer_group_empty_closed"         x="291" y="75" w="8" h="6" />
+    <part id="timeline_layer_group_filled_open_active"   x="278" y="87" w="10" h="6" />
+    <part id="timeline_layer_group_filled_closed_active" x="291" y="86" w="8" h="7" />
+    <part id="timeline_layer_group_empty_open_active"    x="278" y="100" w="10" h="5" />
+    <part id="timeline_layer_group_empty_closed_active"  x="291" y="99" w="8" h="6" />
     <part id="timeline_padding"                 x="276" y="12" w1="1" w2="10" w3="1" h1="1" h2="10" h3="1" />
     <part id="timeline_padding_tr"              x="288" y="12" w1="1" w2="10" w3="1" h1="1" h2="10" h3="1" />
     <part id="timeline_padding_bl"              x="276" y="24" w1="1" w2="10" w3="1" h1="1" h2="10" h3="1" />
@@ -559,6 +567,32 @@
     </style>
     <style id="timeline_discontinuous:active">
       <icon part="timeline_discontinuous_active" />
+    </style>
+
+    <!-- timeline_layer_group -->
+    <style id="timeline_layer_group_filled_open" base="timeline_box">
+      <icon part="timeline_layer_group_filled_open" align="center" valign="middle" />
+    </style>
+    <style id="timeline_layer_group_filled_closed" base="timeline_box">
+      <icon part="timeline_layer_group_filled_closed" align="center" valign="middle" />
+    </style>
+    <style id="timeline_layer_group_empty_open" base="timeline_box">
+      <icon part="timeline_layer_group_empty_open" align="center" valign="middle" />
+    </style>
+    <style id="timeline_layer_group_empty_closed" base="timeline_box">
+      <icon part="timeline_layer_group_empty_closed" align="center" valign="middle" />
+    </style>
+    <style id="timeline_layer_group_filled_open_selected" base="timeline_box">
+      <icon part="timeline_layer_group_filled_open_active" align="center" valign="middle" />
+    </style>
+    <style id="timeline_layer_group_filled_closed_selected" base="timeline_box">
+      <icon part="timeline_layer_group_filled_closed_active" align="center" valign="middle" />
+    </style>
+    <style id="timeline_layer_group_empty_open_selected" base="timeline_box">
+      <icon part="timeline_layer_group_empty_open_active" align="center" valign="middle" />
+    </style>
+    <style id="timeline_layer_group_empty_closed_selected" base="timeline_box">
+      <icon part="timeline_layer_group_empty_closed_active" align="center" valign="middle" />
     </style>
 
     <!-- timeline_layer -->

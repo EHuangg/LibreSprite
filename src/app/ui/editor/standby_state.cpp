@@ -296,7 +296,7 @@ bool StandbyState::onMouseDown(Editor* editor, MouseMessage* msg)
   }
 
   // Start the Tool-Loop
-  if (layer) {
+  if (layer && layer->isImage()) {
     // Disable layer edges to avoid showing the modified cel
     // information by ExpandCelCanvas (i.e. the cel origin is changed
     // to 0,0 coordinate.)
@@ -317,6 +317,11 @@ bool StandbyState::onMouseDown(Editor* editor, MouseMessage* msg)
     // Restore layer edges
     if (layerEdges)
       layerEdgesOption(true);
+    return true;
+  }
+
+  if (clickedInk->isPaint()) {
+    editor->showMouseCursor(kForbiddenCursor);
     return true;
   }
 
