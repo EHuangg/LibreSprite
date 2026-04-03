@@ -66,8 +66,11 @@ void MoveLayer::moveLayer(LayerFolder* newFolder, Layer* afterThis)
   Layer* layer = m_layer.layer();
   LayerFolder* oldFolder = layer->parent();
 
-  if (afterThis)
-    ASSERT(afterThis->parent() == newFolder);
+  // Be defensive here: timeline drag/drop can provide a stale anchor when
+  // moving layers across folder boundaries. In that case we just insert at
+  // the beginning of the destination folder instead of crashing.
+  if (afterThis && afterThis->parent() != newFolder)
+    afterThis = nullptr;
 
   if (oldFolder != newFolder) {
     oldFolder->removeLayer(layer);

@@ -2578,170 +2578,128 @@ void Timeline::dropRange(DropOp op)
     return selectedLayers;
   };
 
-  // Helper to find common parent folder of layers
-  auto getCommonParent = [](const std::vector<Layer*>& layers) -> LayerFolder* {
-    if (layers.empty()) return nullptr;
-    LayerFolder* parent = layers[0]->parent();
-    for (size_t i = 1; i < layers.size(); ++i) {
-      if (layers[i]->parent() != parent)
-        return nullptr;  // Not all in same parent
-    }
-    return parent;
-  };
+  if (m_range.type() == Range::kLayers) {
+    if (!validLayer(m_dropTarget.layerIdx))
+      return;
 
-  if (m_range.type() == Range::kLayers && validLayer(m_dropTarget.layerIdx)) {
     std::vector<Layer*> selectedLayers = getSelectedLayers();
     if (selectedLayers.empty())
       return;
-      
+
     Layer* target = m_layers[m_dropTarget.layerIdx];
-    LayerFolder* selectedParent = getCommonParent(selectedLayers);
-    LayerFolder* targetParent = target ? target->parent() : nullptr;
+    if (!target)
+      return;
+
     LayerFolder* targetFolder = nullptr;
-    bool shouldUseCrossFolderApi = false;
+    Layer* afterThis = nullptr;
 
-    // Determine if we need to use cross-folder API
     if (m_dropTarget.vhit == DropTarget::InsideFolder) {
-      // Dropping INTO a folder
-      if (!target || !target->isFolder()) {
-        return;  // Can only drop inside a folder
-      }
-      
+      if (!target->isFolder())
+        return;
+
       targetFolder = static_cast<LayerFolder*>(target);
-      shouldUseCrossFolderApi = true;
+      afterThis = targetFolder->getLastLayer();
     }
-    else if (m_dropTarget.vhit == DropTarget::Top || m_dropTarget.vhit == DropTarget::Bottom) {
-      // Check if any selected layer is a folder (layerset)
-      bool selectedHasFolder = false;
-      for (Layer* layer : selectedLayers) {
-        if (layer->isFolder()) {
-          selectedHasFolder = true;
-          break;
+    else if (m_dropTarget.vhit == DropTarget::Top ||
+             m_dropTarget.vhit == DropTarget::Bottom) {
+      targetFolder = target->parent();
+      if (!targetFolder)
+        return;
+
+      if (m_dropTarget.vhit == DropTarget::Top) {
+        Layer* prev = nullptr;
+        for (Layer* sibling : targetFolder->getLayersList()) {
+          if (sibling == target)
+            break;
+          prev = sibling;
         }
+        afterThis = prev;
       }
-      
-      // Check if target is a folder
-      bool targetIsFolder = target && target->isFolder();
-      
-      // If ANY layer is nested or is a folder, use cross-folder API
-      // Standard move_range() doesn't work with nested structures
-      if (selectedParent || targetParent || selectedHasFolder || targetIsFolder) {
-        // Determine target folder for nested/folder operations
-        if (targetParent) {
-          targetFolder = targetParent;
-        }
-        else if (selectedParent) {
-          targetFolder = selectedParent;
-        }
-        else {
-          targetFolder = m_sprite->folder();
-        }
-        shouldUseCrossFolderApi = true;
+      else {
+        afterThis = target;
       }
-      // else: pure top-level non-folder operations, fall through to standard logic
+    }
+    else {
+      return;
     }
 
-    if (shouldUseCrossFolderApi && targetFolder) {
-      // Validate constraints
-      for (Layer* layer : selectedLayers) {
-        if (layer == targetFolder || isLayerDescendantOf(targetFolder, layer)) {
-          ui::Alert::show("Problem<<Cannot move/copy a layer set into itself.||&OK");
-          return;
-        }
-        
-        // Prevent layer sets from being placed inside other layer sets
-        if (layer->isFolder() && targetFolder != m_sprite->folder()) {
-          ui::Alert::show("Problem<<Layer sets can only be at the top level.||&OK");
-          return;
-        }
-      }
-
-      prepareToMoveRange();
-
-      try {
-        ContextWriter writer(UIContext::instance());
-        Transaction transaction(writer.context(), copy ? "Copy Layers": "Move Layers");
-        DocumentApi api = m_document->getApi(transaction);
-
-        std::vector<Layer*> movedLayers;
-        movedLayers.reserve(selectedLayers.size());
-
-        // Determine insert position within target folder
-        Layer* afterThis = nullptr;
-        if (m_dropTarget.vhit == DropTarget::Top && target && targetFolder) {
-          // Find the layer before target in targetFolder's list
-          Layer* prevLayer = nullptr;
-          for (Layer* layer : targetFolder->getLayersList()) {
-            if (layer == target)
-              break;
-            prevLayer = layer;
-          }
-          afterThis = prevLayer;  // nullptr if target is first
-        }
-        else if (m_dropTarget.vhit == DropTarget::Bottom && target && targetFolder) {
-          // Insert after target
-          afterThis = target;
-        }
-        else if (targetFolder) {
-          // InsideFolder: append to end
-          afterThis = targetFolder->getLastLayer();
-        }
-
-        if (copy) {
-          for (Layer* layer : selectedLayers) {
-            api.duplicateLayerAfter(layer, layer);
-            Layer* duplicate = layer->getNext();
-            if (!duplicate)
-              throw std::runtime_error("Cannot duplicate layer");
-
-            api.restackLayerInFolder(duplicate, targetFolder, afterThis);
-            afterThis = duplicate;
-            movedLayers.push_back(duplicate);
-          }
-        }
-        else {
-          for (Layer* layer : selectedLayers) {
-            api.restackLayerInFolder(layer, targetFolder, afterThis);
-            afterThis = layer;
-            movedLayers.push_back(layer);
-          }
-        }
-
-        transaction.commit();
-
-        m_document->notifyGeneralUpdate();
-        regenerateLayers();
-
-        LayerIndex first = LayerIndex::NoLayer;
-        LayerIndex last = LayerIndex::NoLayer;
-        for (Layer* layer : movedLayers) {
-          LayerIndex idx = getLayerIndex(layer);
-          if (idx == LayerIndex::NoLayer)
-            continue;
-
-          if (first == LayerIndex::NoLayer || idx < first)
-            first = idx;
-          if (last == LayerIndex::NoLayer || idx > last)
-            last = idx;
-        }
-
-        if (first != LayerIndex::NoLayer && last != LayerIndex::NoLayer) {
-          m_range.startRange(first, m_frame, Range::kLayers);
-          m_range.endRange(last, m_frame);
-        }
-        else {
-          m_range.disableRange();
-        }
-
-        if (!movedLayers.empty() && getLayerIndex(movedLayers[0]) != LayerIndex::NoLayer)
-          setLayer(movedLayers[0]);
-
+    for (Layer* layer : selectedLayers) {
+      if (layer == targetFolder || isLayerDescendantOf(targetFolder, layer)) {
+        ui::Alert::show("Problem<<Cannot move/copy a layer set into itself.||&OK");
         return;
       }
-      catch (const std::exception& e) {
-        ui::Alert::show("Problem<<%s||&OK", e.what());
+
+      // Layer sets are top-level only.
+      if (layer->isFolder() && targetFolder != m_sprite->folder()) {
+        ui::Alert::show("Problem<<Layer sets can only be at the top level.||&OK");
         return;
       }
+    }
+
+    prepareToMoveRange();
+
+    try {
+      ContextWriter writer(UIContext::instance());
+      Transaction transaction(writer.context(), copy ? "Copy Layers": "Move Layers");
+      DocumentApi api = m_document->getApi(transaction);
+
+      std::vector<Layer*> movedLayers;
+      movedLayers.reserve(selectedLayers.size());
+
+      if (copy) {
+        for (Layer* layer : selectedLayers) {
+          api.duplicateLayerAfter(layer, layer);
+          Layer* duplicate = layer->getNext();
+          if (!duplicate)
+            throw std::runtime_error("Cannot duplicate layer");
+
+          api.restackLayerInFolder(duplicate, targetFolder, afterThis);
+          afterThis = duplicate;
+          movedLayers.push_back(duplicate);
+        }
+      }
+      else {
+        for (Layer* layer : selectedLayers) {
+          api.restackLayerInFolder(layer, targetFolder, afterThis);
+          afterThis = layer;
+          movedLayers.push_back(layer);
+        }
+      }
+
+      transaction.commit();
+
+      m_document->notifyGeneralUpdate();
+      regenerateLayers();
+
+      LayerIndex first = LayerIndex::NoLayer;
+      LayerIndex last = LayerIndex::NoLayer;
+      for (Layer* layer : movedLayers) {
+        LayerIndex idx = getLayerIndex(layer);
+        if (idx == LayerIndex::NoLayer)
+          continue;
+
+        if (first == LayerIndex::NoLayer || idx < first)
+          first = idx;
+        if (last == LayerIndex::NoLayer || idx > last)
+          last = idx;
+      }
+
+      if (first != LayerIndex::NoLayer && last != LayerIndex::NoLayer) {
+        m_range.startRange(first, m_frame, Range::kLayers);
+        m_range.endRange(last, m_frame);
+      }
+      else {
+        m_range.disableRange();
+      }
+
+      if (!movedLayers.empty() && getLayerIndex(movedLayers[0]) != LayerIndex::NoLayer)
+        setLayer(movedLayers[0]);
+
+      return;
+    }
+    catch (const std::exception& e) {
+      ui::Alert::show("Problem<<%s||&OK", e.what());
+      return;
     }
   }
 
